@@ -1,0 +1,3356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, height=device-height">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="description" content="单词跟读练习系统 - 支持Excel导入、录音跟读、默写练习">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; img-src 'self' data: https:; media-src 'self' blob: https:;">
+    <title>单词跟读练习系统</title>
+
+    <!-- 预连接优化 -->
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+
+    <!-- 备用CDN - 使用多个CDN提高可用性 -->
+    <script>
+        // CDN故障转移机制
+        const CDN_URLS = [
+            'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+            'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+            'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js'
+        ];
+
+        let loadXLSXSuccess = false;
+
+        function loadScriptWithFallback(urls, index = 0) {
+            if (index >= urls.length) {
+                console.error('所有CDN均加载失败');
+                showNotification('⚠️ 网络连接问题，Excel功能暂时不可用<br><br>建议：<br>1. 检查网络连接<br>2. 稍后刷新重试<br>3. 使用学习包功能替代');
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = urls[index];
+            script.onerror = () => {
+                console.warn(`CDN ${index + 1} 加载失败，尝试下一个...`);
+                loadScriptWithFallback(urls, index + 1);
+            };
+            script.onload = () => {
+                console.log(`XLSX库加载成功 (CDN ${index + 1})`);
+                loadXLSXSuccess = true;
+            };
+            document.head.appendChild(script);
+        }
+
+        // 开始加载
+        loadScriptWithFallback(CDN_URLS);
+
+        // ========== 安全工具函数 ==========
+        // HTML转义函数，防止XSS攻击
+        function escapeHTML(str) {
+            if (typeof str !== 'string') return str;
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // 安全的HTML内容设置
+        function safeSetHTML(element, content) {
+            if (typeof content === 'string') {
+                element.innerHTML = content;
+            } else {
+                element.textContent = content;
+            }
+        }
+
+        // 文件大小格式化
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+    </script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 8px 10px;
+            padding-bottom: 100px;
+            background-color: #f5f5f5;
+            min-height: 100vh;
+        }
+        .container {
+            background-color: white;
+            padding: 12px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        /* 登录界面 */
+        .login-container {
+            background-color: white;
+            padding: 30px 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
+            margin: 40px auto;
+        }
+        .login-title {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 22px;
+            font-weight: bold;
+        }
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .form-group label {
+            font-weight: bold;
+            color: #555;
+            font-size: 13px;
+        }
+        .form-group input {
+            padding: 10px;
+            font-size: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .login-button {
+            padding: 12px;
+            font-size: 15px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        .login-button:hover {
+            background-color: #2980b9;
+        }
+        /* 顶部导航 */
+        .top-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 15px;
+        }
+        .user-info {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .nav-dropdown {
+            position: relative;
+        }
+        .dropdown-btn {
+            padding: 8px 16px;
+            font-size: 13px;
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            font-weight: 600;
+        }
+        .dropdown-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .dropdown-btn.admin {
+            background-color: #8e44ad;
+        }
+        .dropdown-btn.admin:hover {
+            background-color: #7d3c98;
+        }
+        .dropdown-btn.student {
+            background-color: #e67e22;
+        }
+        .dropdown-btn.student:hover {
+            background-color: #d35400;
+        }
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background-color: white;
+            min-width: 160px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            border-radius: 4px;
+            z-index: 100;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+        .dropdown-content.show {
+            display: block;
+            animation: fadeIn 0.2s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .dropdown-content a {
+            color: #333;
+            padding: 10px 16px;
+            text-decoration: none;
+            display: block;
+            font-size: 13px;
+            transition: background-color 0.2s;
+            cursor: pointer;
+        }
+        .dropdown-content a:hover {
+            background-color: #f5f5f5;
+            color: #3498db;
+        }
+        .dropdown-content a.logout {
+            color: #e74c3c;
+        }
+        .dropdown-content a.logout:hover {
+            background-color: #fee;
+        }
+        /* 移除旧的按钮样式，避免与椭圆按钮样式冲突 */
+        .switch-btn {
+            background-color: #3498db !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 20px !important;
+            cursor: pointer !important;
+            padding: 0 !important;
+            font-size: 14px !important;
+            font-weight: 600 !important;
+            transition: all 0.2s ease !important;
+            height: 40px !important;
+            width: 110px !important;
+            white-space: nowrap !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            box-sizing: border-box !important;
+            margin: 5px !important;
+            line-height: 1 !important;
+        }
+        .switch-btn:hover {
+            background-color: #2980b9;
+        }
+        .switch-btn.gray {
+            background-color: #7f8c8d;
+        }
+        .switch-btn.gray:hover {
+            background-color: #6c7a7b;
+        }
+        .file-section button {
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(39, 174, 96, 0.3);
+            transition: all 0.2s ease;
+        }
+        .file-section button:hover {
+            background-color: #229954;
+            box-shadow: 0 4px 8px rgba(39, 174, 96, 0.4);
+        }
+        .login-button {
+            padding: 12px 20px;
+            font-size: 16px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(52, 152, 219, 0.3);
+            transition: all 0.2s ease;
+        }
+        .login-button:hover {
+            background-color: #2980b9;
+            box-shadow: 0 4px 8px rgba(52, 152, 219, 0.4);
+        }
+        .top-section {
+            display: flex;
+            justify-content: space-between;
+            gap: 15px;
+            align-items: stretch;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .file-section {
+            flex: 2;
+            min-width: 250px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            background: #f9f9f9;
+            padding: 12px;
+            border-radius: 4px;
+        }
+        .file-section input[type="file"] {
+            flex: 1;
+            font-size: 13px;
+        }
+        .file-section button {
+            padding: 8px 16px;
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            white-space: nowrap;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: background-color 0.2s, box-shadow 0.2s;
+        }
+        .file-section button:hover {
+            background-color: #229954;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+        }
+        .status-bar {
+            flex: 1;
+            min-width: 200px;
+            padding: 10px 12px;
+            background-color: #ecf0f1;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #555;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            justify-content: center;
+        }
+        .status-bar .jump-section {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        .status-bar input[type="number"] {
+            width: 50px;
+            padding: 4px 8px;
+            border: 1px solid #bdc3c7;
+            border-radius: 3px;
+            font-size: 13px;
+            text-align: center;
+        }
+        .status-bar button {
+            padding: 4px 10px;
+            font-size: 12px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .status-bar button:hover {
+            background-color: #2980b9;
+        }
+        /* 练习区域 */
+        .exercise-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .word-row {
+            display: flex;
+            gap: 12px;
+            align-items: stretch;
+        }
+        .word-display {
+            flex: 1;
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+            padding: 12px 15px;
+            background-color: #fff;
+            border: 2px solid #3498db;
+            border-radius: 6px;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 52px;
+        }
+        .input-group {
+            flex: 1;
+            display: flex;
+            align-items: stretch;
+        }
+        .input-group input[type="text"] {
+            flex: 1;
+            padding: 10px 12px;
+            font-size: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .input-group input[type="text"]:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .input-group textarea {
+            flex: 1;
+            padding: 10px 12px;
+            font-size: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+            min-height: 80px;
+            font-family: inherit;
+        }
+        .input-group textarea:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .jump-section {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        .jump-section input[type="number"] {
+            width: 50px;
+            padding: 4px 8px;
+            border: 1px solid #bdc3c7;
+            border-radius: 3px;
+            font-size: 13px;
+            text-align: center;
+        }
+        .jump-section button {
+            padding: 4px 10px;
+            font-size: 12px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .jump-section button:hover {
+            background-color: #2980b9;
+        }
+        /* 单词填写按钮组 */
+        .button-group {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+            justify-content: center;
+            margin-top: 10px;
+        }
+        .button-group .action-btn {
+            flex: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 40px;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 0 16px;
+            min-width: 80px;
+            max-width: 120px;
+            border-radius: 5px;
+        }
+        .input-group-with-controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .input-group-with-controls input[type="text"] {
+            flex: 2;
+            min-width: 150px;
+            height: 38px;
+        }
+        .input-group-with-controls .action-btn {
+            flex: 1;
+            max-width: 100px;
+            min-height: 38px;
+        }
+        /* 按钮统一样式 */
+        .action-btn, .nav-btn, .record-btn, .play-btn, .switch-btn, .file-section button, .login-button {
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 38px;
+        }
+        .action-btn:hover, .nav-btn:hover, .record-btn:hover, .play-btn:hover, .switch-btn:hover, .file-section button:hover, .login-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .action-btn:active, .nav-btn:active, .record-btn:active, .play-btn:active, .switch-btn:active, .file-section button:active, .login-button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .action-btn:disabled, .nav-btn:disabled, .record-btn:disabled, .play-btn:disabled, .switch-btn:disabled, .file-section button:disabled, .login-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        .action-btn {
+            background-color: #3498db;
+            color: white;
+        }
+        .action-btn:hover {
+            background-color: #2980b9;
+        }
+        .action-btn.hint {
+            background-color: #f39c12;
+        }
+        .action-btn.hint:hover {
+            background-color: #e67e22;
+        }
+        .action-btn.voice {
+            background-color: #9b59b6;
+        }
+        .action-btn.voice:hover {
+            background-color: #8e44ad;
+        }
+        .action-btn.next {
+            background-color: #e74c3c !important;
+            height: 40px !important;
+            padding: 0 20px !important;
+            font-size: 14px !important;
+            font-weight: 600 !important;
+            border-radius: 20px !important;
+            white-space: nowrap !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-width: 70px !important;
+            max-width: 120px !important;
+            box-sizing: border-box !important;
+            margin: 5px !important;
+            line-height: 1 !important;
+            border: none !important;
+            color: white !important;
+            cursor: pointer !important;
+        }
+        .feedback {
+            font-size: 14px;
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .feedback.correct {
+            background-color: #27ae60;
+            color: white;
+        }
+        .feedback.incorrect {
+            background-color: #e74c3c;
+            color: white;
+        }
+        /* 短句练习区域 */
+        .sentence-section {
+            background-color: #f8f9fa;
+            padding: 12px;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .section-title {
+            font-size: 15px;
+            font-weight: bold;
+            color: #333;
+            text-align: center;
+            margin-bottom: 5px;
+        }
+        .sentence-display {
+            font-size: 16px;
+            line-height: 1.5;
+            text-align: center;
+            color: #2c3e50;
+            padding: 8px;
+            background-color: white;
+            border-radius: 4px;
+        }
+        .sentence-display small {
+            display: block;
+            margin-top: 6px;
+            color: #7f8c8d;
+            font-size: 13px;
+        }
+        .recording-controls {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            align-items: center;
+        }
+        .record-btn {
+            padding: 0 20px !important;
+            font-size: 14px !important;
+            background-color: #e74c3c !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 20px !important;
+            cursor: pointer !important;
+            transition: all 0.2s !important;
+            height: 40px !important;
+            min-width: 70px !important;
+            max-width: 120px !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            white-space: nowrap !important;
+            box-sizing: border-box !important;
+            margin: 5px !important;
+            font-weight: 600 !important;
+            line-height: 1 !important;
+        }
+        .record-btn:hover {
+            background-color: #c0392b;
+        }
+        .record-btn.recording {
+            animation: pulse 1s infinite;
+        }
+        .play-btn {
+            padding: 0 20px !important;
+            font-size: 14px !important;
+            background-color: #27ae60 !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 20px !important;
+            cursor: pointer !important;
+            height: 40px !important;
+            min-width: 70px !important;
+            max-width: 120px !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            white-space: nowrap !important;
+            box-sizing: border-box !important;
+            margin: 5px !important;
+            font-weight: 600 !important;
+            line-height: 1 !important;
+        }
+        .play-btn.voice {
+            background-color: #9b59b6 !important;
+        }
+        .play-btn.voice:hover {
+            background-color: #8e44ad;
+        }
+        .play-btn:hover {
+            background-color: #229954;
+        }
+        .record-status {
+            text-align: center;
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+        }
+        .switch-section {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-top: 8px;
+        }
+        .hint-text {
+            text-align: center;
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-bottom: 5px;
+        }
+        /* 统计报告 */
+        .report-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            max-width: 700px;
+            margin: 0 auto;
+        }
+        .report-header {
+            text-align: center;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .report-header h2 {
+            margin: 0 0 5px 0;
+            font-size: 22px;
+        }
+        .report-header p {
+            margin: 0;
+            color: #7f8c8d;
+            font-size: 13px;
+        }
+        .report-section {
+            margin-bottom: 15px;
+            padding: 12px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .report-section h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 15px;
+            font-weight: bold;
+        }
+        .report-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .report-item {
+            padding: 10px;
+            background-color: white;
+            border-radius: 4px;
+            border-left: 3px solid #3498db;
+            text-align: center;
+        }
+        .report-item strong {
+            display: block;
+            color: #555;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .report-item span {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .report-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 13px;
+        }
+        .report-table th, .report-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .report-table th {
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .report-table tr:hover {
+            background-color: #f9f9f9;
+        }
+        .status-correct {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .status-incorrect {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .report-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+        .report-buttons button {
+            padding: 10px 20px;
+            font-size: 14px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .report-buttons button:hover {
+            background-color: #2980b9;
+        }
+        .report-buttons button.export {
+            background-color: #27ae60;
+        }
+        .report-buttons button.export:hover {
+            background-color: #229954;
+        }
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            body {
+                margin: 0;
+                padding: 5px 8px;
+                padding-bottom: 150px;
+            }
+            .container, .login-container, .report-container {
+                max-width: 100%;
+                margin: 0;
+                border-radius: 6px;
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+            }
+            .login-container {
+                padding: 15px 12px;
+                margin-top: 10px;
+            }
+            .container {
+                padding: 10px;
+                gap: 8px;
+            }
+            .top-nav {
+                flex-direction: row;
+                gap: 8px;
+                padding: 8px 0;
+                margin-bottom: 8px;
+            }
+            .user-info {
+                font-size: 11px;
+                flex: 1;
+            }
+            .nav-buttons {
+                gap: 6px;
+            }
+            .dropdown-btn {
+                padding: 6px 10px;
+                font-size: 11px;
+            }
+            .dropdown-content {
+                min-width: 140px;
+            }
+            .file-section {
+                flex-direction: column;
+                gap: 6px;
+            }
+            .file-section input[type="file"] {
+                width: 100%;
+                font-size: 11px;
+            }
+            .file-section button {
+                width: 100%;
+                padding: 8px 10px;
+                font-size: 12px;
+            }
+            .status-bar {
+                flex-direction: column;
+                gap: 6px;
+                text-align: center;
+                font-size: 12px;
+            }
+            .word-row {
+                flex-direction: column;
+                gap: 6px;
+            }
+            .word-display {
+                font-size: 15px;
+                padding: 10px;
+                min-height: 45px;
+            }
+            .input-group {
+                flex-direction: column;
+                gap: 6px;
+            }
+            .input-group input[type="text"] {
+                width: 100%;
+                font-size: 14px;
+                padding: 8px 10px;
+                height: 40px;
+            }
+            .button-group {
+                flex-wrap: wrap;
+                gap: 6px;
+                margin-top: 6px;
+            }
+            .action-btn {
+                min-width: 45%;
+                padding: 8px 6px;
+                font-size: 12px;
+                height: 36px;
+            }
+            .action-btn.next {
+                min-width: 50%;
+            }
+            .section-title {
+                font-size: 13px;
+                margin-bottom: 4px;
+            }
+            .sentence-display {
+                font-size: 13px;
+                padding: 8px;
+                line-height: 1.4;
+            }
+            .recording-controls {
+                flex-wrap: wrap;
+                gap: 6px;
+                justify-content: center;
+            }
+            .record-btn, .play-btn {
+                padding: 8px 12px;
+                font-size: 12px;
+                width: 70px;
+                height: 36px;
+            }
+            .record-status {
+                font-size: 11px;
+            }
+            .switch-section {
+                gap: 6px;
+                margin-top: 6px;
+            }
+            .switch-btn {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+            .feedback {
+                font-size: 13px;
+                padding: 8px;
+            }
+            .report-container {
+                padding: 12px;
+            }
+            .report-header h2 {
+                font-size: 18px;
+            }
+            .report-header p {
+                font-size: 12px;
+            }
+            .report-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+            .report-item {
+                padding: 8px;
+            }
+            .report-item span {
+                font-size: 16px;
+            }
+            .report-table {
+                font-size: 11px;
+            }
+            .report-table th, .report-table td {
+                padding: 6px 4px;
+            }
+            .report-buttons {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .report-buttons button {
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+        }
+        @media (max-width: 480px) {
+            .word-display {
+                font-size: 15px;
+                padding: 10px;
+            }
+            .input-group {
+                flex-direction: column;
+            }
+            .input-group input[type="text"] {
+                width: 100%;
+                font-size: 14px;
+            }
+            .action-btn {
+                padding: 9px 6px;
+                font-size: 12px;
+            }
+            .record-btn, .play-btn {
+                padding: 8px 10px;
+                font-size: 12px;
+                width: 70px;
+                height: 34px;
+            }
+            .recording-controls {
+                flex-direction: row;
+                gap: 6px;
+            }
+            .recording-controls button {
+                flex: 1;
+                min-width: 70px;
+            }
+            .switch-section {
+                flex-direction: row;
+            }
+            .switch-btn {
+                width: auto;
+            }
+        }
+        /* 隐藏元素 */
+        .hidden {
+            display: none !important;
+        }
+        /* 弹窗样式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 20px 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            max-width: 380px;
+            width: 90%;
+            animation: modalFadeIn 0.3s ease;
+        }
+        @media (max-width: 768px) {
+            .modal-content {
+                padding: 15px 12px;
+                max-width: 320px;
+            }
+            .modal-title {
+                font-size: 18px;
+                margin-bottom: 12px;
+            }
+            .modal-form {
+                gap: 10px;
+            }
+            .modal-form .form-group label {
+                font-size: 12px;
+            }
+            .modal-form .form-group input {
+                padding: 8px;
+                font-size: 13px;
+            }
+            .modal-buttons {
+                margin-top: 12px;
+                gap: 8px;
+            }
+            .modal-buttons button {
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+        }
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .modal-title {
+            text-align: center;
+            color: #333;
+            margin-bottom: 18px;
+            font-size: 20px;
+            font-weight: bold;
+        }
+        .modal-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .modal-form .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .modal-form .form-group label {
+            font-weight: bold;
+            color: #555;
+            font-size: 13px;
+        }
+        .modal-form .form-group input {
+            padding: 10px;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .modal-form .form-group input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .modal-buttons button {
+            flex: 1;
+            padding: 10px 15px;
+            font-size: 14px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .modal-buttons .confirm-btn {
+            background-color: #3498db;
+            color: white;
+        }
+        .modal-buttons .confirm-btn:hover {
+            background-color: #2980b9;
+        }
+        .modal-buttons .cancel-btn {
+            background-color: #95a5a6;
+            color: white;
+        }
+        .modal-buttons .cancel-btn:hover {
+            background-color: #7f8c8d;
+        }
+        /* 新增：网络状态提示 */
+        .network-status {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background-color: #fff3cd;
+            color: #856404;
+            text-align: center;
+            padding: 10px;
+            font-size: 13px;
+            display: none;
+            z-index: 2000;
+            border-bottom: 1px solid #ffeaa7;
+        }
+        .network-status.show {
+            display: block;
+        }
+        /* 新增：加载提示 */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 3000;
+        }
+        .loading-overlay.hidden {
+            display: none;
+        }
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loading-text {
+            font-size: 16px;
+            color: #555;
+            font-weight: 500;
+        }
+        /* 新增：音频初始化提示 */
+        .audio-init-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 4000;
+        }
+        .audio-init-overlay.hidden {
+            display: none;
+        }
+        .audio-init-content {
+            background-color: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+        .audio-init-content h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+        .audio-init-content p {
+            color: #555;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+        .audio-init-btn {
+            padding: 12px 30px;
+            font-size: 16px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .audio-init-btn:hover {
+            background-color: #2980b9;
+        }
+        /* 新增：通知提示框 */
+        .notification-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 5000;
+        }
+        .notification-overlay.hidden {
+            display: none;
+        }
+        .notification-content {
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            max-width: 450px;
+            width: 90%;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            animation: modalFadeIn 0.3s ease;
+        }
+        .notification-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+        .notification-message {
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .notification-buttons {
+            display: flex;
+            justify-content: center;
+        }
+        .notification-btn {
+            padding: 10px 30px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .notification-btn:hover {
+            background-color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <!-- 网络状态提示 -->
+    <div class="network-status" id="networkStatus">
+        ⚠️ 网络连接不稳定，部分功能可能受影响
+    </div>
+
+    <!-- 加载动画 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">正在加载系统...</div>
+    </div>
+
+    <!-- 通知提示框 -->
+    <div class="notification-overlay hidden" id="notificationOverlay">
+        <div class="notification-content">
+            <div class="notification-title" id="notificationTitle">提示</div>
+            <div class="notification-message" id="notificationMessage"></div>
+            <div class="notification-buttons">
+                <button class="notification-btn" onclick="hideNotification()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 练习界面 -->
+    <div class="modal-overlay hidden" id="loginModal">
+        <div class="modal-content">
+            <h3 class="modal-title">用户登录</h3>
+            <div class="modal-form">
+                <div class="form-group">
+                    <label>姓名 *</label>
+                    <input type="text" id="modalUserName" placeholder="请输入您的姓名" maxlength="20">
+                </div>
+                <div class="form-group">
+                    <label>部门 *</label>
+                    <input type="text" id="modalUserDept" placeholder="请输入您的部门" maxlength="30">
+                </div>
+                <div class="form-group">
+                    <label>岗位 *</label>
+                    <input type="text" id="modalUserPosition" placeholder="请输入您的岗位" maxlength="30">
+                </div>
+                <div class="modal-buttons">
+                    <button class="cancel-btn" onclick="closeLoginModal()">取消</button>
+                    <button class="confirm-btn" onclick="confirmLoginModal()">确认登录</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 练习界面 -->
+    <div class="container" id="practiceContainer">
+        <input type="file" id="excelFile" accept=".xlsx, .xls" style="display: none;">
+
+        <div class="top-nav">
+            <div class="user-info">
+                <span id="displayUserName"></span>
+            </div>
+            <div class="nav-buttons">
+                <!-- 管理员下拉菜单 -->
+                <div class="nav-dropdown">
+                    <button class="dropdown-btn admin" onclick="toggleDropdown('adminDropdown')">
+                        🛠️ 管理员 ▼
+                    </button>
+                    <div class="dropdown-content" id="adminDropdown">
+                        <a onclick="document.getElementById('excelFile').click(); toggleDropdown('adminDropdown')">📁 加载Excel</a>
+                        <a onclick="exportLearningPackage(); toggleDropdown('adminDropdown')">📦 导出学习包</a>
+                        <a onclick="showMonitoringDashboard(); toggleDropdown('adminDropdown')">📊 监控面板</a>
+                    </div>
+                </div>
+
+                <!-- 学员下拉菜单 -->
+                <div class="nav-dropdown">
+                    <button class="dropdown-btn student" onclick="toggleDropdown('studentDropdown')">
+                        👤 学员 ▼
+                    </button>
+                    <div class="dropdown-content" id="studentDropdown">
+                        <a onclick="showLoginModal(); toggleDropdown('studentDropdown')">🔑 登录</a>
+                        <a onclick="importLearningPackage(); toggleDropdown('studentDropdown')">📥 导入学习包</a>
+                        <a onclick="showReport(); toggleDropdown('studentDropdown')">📈 查看统计</a>
+                        <a class="logout" onclick="logout(); toggleDropdown('studentDropdown')">🚪 退出</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h2 style="text-align: center; color: #333; font-size: 20px; margin: 10px 0;">单词跟读练习系统</h2>
+
+        <div class="status-bar">
+            <span id="status">请导入学习包</span>
+        </div>
+
+        <div class="exercise-section hidden" id="exerciseContainer">
+            <div class="word-row">
+                <div class="word-display" id="wordDisplay">机器人七轴</div>
+                <div class="input-group">
+                    <input type="text" id="answerInput" placeholder="请输入英文单词..." autocomplete="off" maxlength="50">
+                </div>
+                <div class="jump-section">
+                    <span id="progressText">0/0</span>
+                    <input type="number" id="jumpInput" placeholder="跳转" min="1" max="1000">
+                    <button onclick="jumpToWord()">跳转</button>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="action-btn voice" onclick="readWord()">朗读</button>
+                <button class="action-btn" id="submitBtn" onclick="checkAnswer()">提交答案</button>
+                <button class="action-btn hint" id="hintBtn" ontouchstart="showHint()" ontouchend="hideHint()" onmousedown="showHint()" onmouseup="hideHint()" onmouseleave="hideHint()">提示</button>
+            </div>
+
+            <div class="feedback" id="feedback"></div>
+
+            <!-- 短句跟读 -->
+            <div class="sentence-section hidden" id="sentenceExercise">
+                <div class="section-title">跟读练习</div>
+                <div class="sentence-display" id="sentenceDisplay"></div>
+                <div class="recording-controls">
+                    <button class="record-btn" id="recordBtn" onclick="toggleRecording()">录音</button>
+                    <button class="play-btn" id="playBtn" onclick="playRecording()" disabled>回放</button>
+                    <button class="play-btn voice" onclick="readSentence()">朗读句子</button>
+                </div>
+                <div class="record-status" id="recordStatus"></div>
+                <div class="feedback" id="sentenceFeedback"></div>
+                <div class="switch-section">
+                    <button class="switch-btn" onclick="showDictation()">进入默写</button>
+                </div>
+            </div>
+
+            <!-- 默写练习 -->
+            <div class="sentence-section hidden" id="dictationExercise">
+                <div class="section-title">默写练习</div>
+                <div class="hint-text">点击"朗读句子"听音，然后默写</div>
+                <div class="button-group" style="margin-bottom: 8px;">
+                    <button class="action-btn voice" onclick="readSentence()">朗读句子</button>
+                </div>
+                <div class="input-group">
+                    <textarea id="dictationInput" placeholder="请默写英文短句..." rows="3" maxlength="200"></textarea>
+                </div>
+                <div class="button-group">
+                    <button class="action-btn" id="dictationCheckBtn" onclick="checkDictation()">检查答案</button>
+                    <button class="action-btn hint" id="dictationHintBtn" ontouchstart="showDictationHint()" ontouchend="hideDictationHint()" onmousedown="showDictationHint()" onmouseup="hideDictationHint()" onmouseleave="hideDictationHint()">显示答案</button>
+                </div>
+                <div class="feedback" id="dictationFeedback"></div>
+                <div class="switch-section">
+                    <button class="switch-btn gray" onclick="hideDictation()">返回跟读</button>
+                    <button class="action-btn next" id="nextAfterDictationBtn" onclick="nextWord()" disabled>下一个单词</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 统计报告 -->
+    <div class="report-container hidden" id="reportContainer">
+        <div class="report-header">
+            <h2>学习统计报告</h2>
+            <p id="reportUserInfo"></p>
+        </div>
+
+        <div class="report-section">
+            <h3>学习概况</h3>
+            <div class="report-grid">
+                <div class="report-item">
+                    <strong>学习单词</strong>
+                    <span id="reportTotalWords">0</span>
+                </div>
+                <div class="report-item">
+                    <strong>正确率</strong>
+                    <span id="reportAccuracy">0%</span>
+                </div>
+                <div class="report-item">
+                    <strong>正确次数</strong>
+                    <span id="reportCorrectCount">0</span>
+                </div>
+                <div class="report-item">
+                    <strong>错误次数</strong>
+                    <span id="reportIncorrectCount">0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="report-section">
+            <h3>学习详情</h3>
+            <table class="report-table">
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th>中文</th>
+                        <th>英文</th>
+                        <th>单词</th>
+                        <th>跟读</th>
+                        <th>默写</th>
+                    </tr>
+                </thead>
+                <tbody id="reportTableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <div class="report-buttons">
+            <button onclick="hideReport()">返回练习</button>
+            <button class="export" onclick="exportReport()">导出报告</button>
+        </div>
+    </div>
+
+    <script>
+        // ========== GitHub Pages 优化配置 ==========
+
+        // 音频系统初始化状态
+        let audioSystemInitialized = false;
+        let isInitializingAudio = false;
+        let audioInitPromise = null;
+        let userInteracted = false;
+
+        // 网络状态监控
+        let networkOnline = navigator.onLine;
+
+        // 资源清理管理
+        let audioContext = null;
+        let mediaStream = null;
+
+        // 通知系统
+        function showNotification(message, title = '提示') {
+            document.getElementById('notificationTitle').textContent = title;
+            document.getElementById('notificationMessage').innerHTML = message;
+            document.getElementById('notificationOverlay').classList.remove('hidden');
+        }
+
+        function hideNotification() {
+            document.getElementById('notificationOverlay').classList.add('hidden');
+        }
+
+        // 等待页面和资源加载完成
+        window.addEventListener('load', function() {
+            console.log('页面加载完成');
+
+            // 检查XLSX库加载状态
+            setTimeout(function() {
+                if (!loadXLSXSuccess) {
+                    console.warn('XLSX库可能加载失败，但继续运行');
+                }
+
+                // 隐藏加载动画
+                document.getElementById('loadingOverlay').classList.add('hidden');
+
+                // 恢复localStorage数据
+                restoreFromLocalStorage();
+
+            }, 2000);
+        });
+
+        // 监听网络状态变化
+        window.addEventListener('online', function() {
+            networkOnline = true;
+            document.getElementById('networkStatus').classList.remove('show');
+            console.log('网络已连接');
+        });
+
+        window.addEventListener('offline', function() {
+            networkOnline = false;
+            document.getElementById('networkStatus').classList.add('show');
+            console.log('网络已断开');
+        });
+
+        // ========== 按需音频系统初始化 ==========
+
+        // 移除全局点击事件监听器（原空白处触发逻辑）
+
+        // 初始化音频系统（按需调用）
+        function initAudioSystem() {
+            // 如果已经初始化或正在初始化中，直接返回Promise
+            if (audioSystemInitialized) {
+                return Promise.resolve(true);
+            }
+
+            // 如果正在初始化，返回现有的Promise
+            if (isInitializingAudio && audioInitPromise) {
+                return audioInitPromise;
+            }
+
+            // 开始初始化流程
+            isInitializingAudio = true;
+            console.log('开始按需初始化音频系统...');
+
+            audioInitPromise = new Promise((resolve, reject) => {
+                try {
+                    // 1. 初始化语音合成
+                    if ('speechSynthesis' in window) {
+                        const synth = window.speechSynthesis;
+                        synth.getVoices(); // 触发音色加载
+                        console.log('语音合成初始化成功');
+                    } else {
+                        console.warn('当前浏览器不支持语音合成');
+                    }
+
+                    // 2. 标记音频系统已初始化
+                    audioSystemInitialized = true;
+                    isInitializingAudio = false;
+                    console.log('✅ 音频系统初始化完成');
+                    resolve(true);
+
+                } catch (error) {
+                    console.error('音频系统初始化失败:', error);
+                    isInitializingAudio = false;
+                    audioInitPromise = null;
+                    reject(error);
+                }
+            });
+
+            return audioInitPromise;
+        }
+
+        // 统一音频功能入口（带状态提示）
+        async function ensureAudioInitialized(actionType) {
+            // 如果已经初始化，直接返回
+            if (audioSystemInitialized) {
+                return true;
+            }
+
+            // 显示初始化状态提示
+            let statusMessage = '';
+            switch(actionType) {
+                case 'read_word':
+                    statusMessage = '🔊 正在初始化音频系统...<br><br>准备朗读单词';
+                    break;
+                case 'read_sentence':
+                    statusMessage = '🔊 正在初始化音频系统...<br><br>准备朗读句子';
+                    break;
+                case 'record':
+                    statusMessage = '🎤 正在初始化音频系统...<br><br>准备录音功能';
+                    break;
+                default:
+                    statusMessage = '🔊 正在初始化音频系统...';
+            }
+
+            // 显示轻量级状态提示（使用loadingOverlay，但移除audioInitOverlay）
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const loadingText = document.querySelector('.loading-text');
+            loadingText.textContent = '正在初始化音频系统...';
+            loadingOverlay.classList.remove('hidden');
+
+            try {
+                await initAudioSystem();
+                loadingOverlay.classList.add('hidden');
+                showNotification('✅ 音频系统初始化完成！<br><br>现在可以使用语音播放功能。');
+                return true;
+            } catch (error) {
+                loadingOverlay.classList.add('hidden');
+                showNotification('⚠️ 音频系统初始化失败<br><br>请刷新页面后重试');
+                return false;
+            }
+        }
+
+        // 页面卸载时清理资源
+        window.addEventListener('beforeunload', function() {
+            cleanupResources();
+        });
+
+        // 资源清理函数
+        function cleanupResources() {
+            // 清理录音资源
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => {
+                    track.stop();
+                    console.log('已停止媒体轨道');
+                });
+                mediaStream = null;
+            }
+
+            // 清理音频上下文
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close();
+                audioContext = null;
+                console.log('已关闭音频上下文');
+            }
+
+            // 清理定时器
+            if (learningTimerInterval) {
+                clearInterval(learningTimerInterval);
+                learningTimerInterval = null;
+                console.log('已清理学习计时器');
+            }
+
+            // 清理录音对象
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                try {
+                    mediaRecorder.stop();
+                } catch (e) {
+                    console.log('录音对象已停止或无需停止');
+                }
+            }
+
+            console.log('资源清理完成');
+        }
+
+        // ========== localStorage 数据持久化 ==========
+
+        // 保存数据到localStorage
+        function saveToLocalStorage() {
+            try {
+                const dataToSave = {
+                    userInfo: userInfo,
+                    wordData: wordData,
+                    currentIndex: currentIndex,
+                    learningRecords: learningRecords,
+                    currentRecord: currentRecord,
+                    totalLearningTime: totalLearningTime,
+                    lastSaveTime: new Date().toISOString(),
+                    version: '2.0'
+                };
+
+                const jsonString = JSON.stringify(dataToSave);
+
+                // 检查数据大小（localStorage通常限制在5-10MB）
+                if (jsonString.length > 4 * 1024 * 1024) { // 4MB
+                    console.warn('数据过大，跳过保存到localStorage');
+                    showNotification('⚠️ 数据量较大，暂不保存到本地存储<br><br>建议定期导出学习记录备份');
+                    return;
+                }
+
+                localStorage.setItem('wordPracticeData', jsonString);
+                console.log('数据已保存到localStorage，大小：' + formatFileSize(jsonString.length));
+            } catch (error) {
+                console.error('保存到localStorage失败:', error);
+
+                // 如果localStorage满了，尝试清理旧数据
+                if (error.name === 'QuotaExceededError') {
+                    try {
+                        // 清理7天前的数据
+                        localStorage.removeItem('wordPracticeData');
+                        showNotification('⚠️ 本地存储空间不足<br><br>已清理旧数据，建议定期导出学习记录备份');
+                    } catch (e) {
+                        console.error('localStorage清理失败:', e);
+                        showNotification('⚠️ 本地存储空间不足<br><br>请定期导出学习记录备份');
+                    }
+                }
+            }
+        }
+
+        // 从localStorage恢复数据
+        function restoreFromLocalStorage() {
+            try {
+                const savedData = localStorage.getItem('wordPracticeData');
+                if (savedData) {
+                    const data = JSON.parse(savedData);
+
+                    // 检查数据版本和过期时间（3天）
+                    const lastSave = new Date(data.lastSaveTime);
+                    const now = new Date();
+                    const daysDiff = (now - lastSave) / (1000 * 60 * 60 * 24);
+
+                    if (daysDiff > 3) {
+                        console.log('保存的数据已过期（超过3天），清除旧数据');
+                        localStorage.removeItem('wordPracticeData');
+                        showNotification('📅 学习数据已过期<br><br>超过3天的数据已自动清除，请重新导入学习包');
+                        return;
+                    }
+
+                    // 数据验证和恢复
+                    if (data.userInfo && typeof data.userInfo === 'object') {
+                        userInfo = {
+                            name: sanitizeString(data.userInfo.name) || '',
+                            dept: sanitizeString(data.userInfo.dept) || '',
+                            position: sanitizeString(data.userInfo.position) || ''
+                        };
+
+                        if (userInfo.name) {
+                            document.getElementById('displayUserName').textContent =
+                                `${userInfo.name} - ${userInfo.dept} - ${userInfo.position}`;
+                        }
+                    }
+
+                    if (data.wordData && Array.isArray(data.wordData) && data.wordData.length > 0) {
+                        // 验证和清理单词数据
+                        wordData = data.wordData.filter(item =>
+                            item && typeof item === 'object' &&
+                            typeof item.word === 'string' &&
+                            typeof item.meaning === 'string'
+                        ).map(item => ({
+                            word: sanitizeString(item.word),
+                            meaning: sanitizeString(item.meaning),
+                            sentence: sanitizeString(item.sentence || ''),
+                            sentenceTranslation: sanitizeString(item.sentenceTranslation || '')
+                        }));
+
+                        if (wordData.length > 0) {
+                            currentIndex = Math.min(Math.max(0, data.currentIndex || 0), wordData.length - 1);
+                            learningRecords = Array.isArray(data.learningRecords) ? data.learningRecords : [];
+                            currentRecord = data.currentRecord || {};
+                            totalLearningTime = Math.max(0, data.totalLearningTime || 0);
+
+                            document.getElementById('status').textContent =
+                                `已恢复学习进度：${wordData.length} 个单词`;
+                            document.getElementById('progressText').textContent =
+                                `${currentIndex + 1}/${wordData.length}`;
+                            document.getElementById('exerciseContainer').classList.remove('hidden');
+
+                            // 恢复当前单词
+                            if (currentIndex < wordData.length) {
+                                showCurrentWord();
+                            }
+
+                            console.log('数据已从localStorage恢复，共 ' + wordData.length + ' 个单词');
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('从localStorage恢复数据失败:', error);
+                // 数据损坏时清除
+                localStorage.removeItem('wordPracticeData');
+            }
+        }
+
+        // 清除localStorage数据
+        function clearLocalStorage() {
+            try {
+                localStorage.removeItem('wordPracticeData');
+                console.log('localStorage数据已清除');
+            } catch (error) {
+                console.error('清除localStorage失败:', error);
+            }
+        }
+
+        // 字符串清理函数，防止恶意数据
+        function sanitizeString(str) {
+            if (typeof str !== 'string') return '';
+            // 移除可能的HTML标签和脚本
+            return str.replace(/<[^>]*>/g, '').trim().substring(0, 200);
+        }
+
+        // ========== 原有功能代码 ==========
+
+        // 用户信息
+        let userInfo = { name: '', dept: '', position: '' };
+
+        // 学习记录
+        let learningRecords = [];
+        let currentRecord = {
+            wordIndex: 0, meaning: '', word: '', wordCorrect: false,
+            sentenceRecorded: false, sentenceDictated: false,
+            sentenceDictatedCorrect: false, wordAttempts: 0
+        };
+        let wordData = [];
+        let currentIndex = 0;
+        let isCorrect = false;
+        let currentSentence = '';
+        let currentState = 'word_input';
+        let sentenceRecorded = false;
+
+        // 录音相关
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        let currentAudioMimeType = '';
+
+        // 学习包和提交相关
+        let currentTaskInfo = null;
+        let isLearningPackageMode = false;
+        let collectedRecords = [];
+
+        // 学习计时相关
+        let learningStartTime = null;
+        let learningTimerInterval = null;
+        let totalLearningTime = 0;
+
+        // 单词模板
+        const wordTemplates = {
+            'axis': ['The robot has a 7 ____ system for greater flexibility.', 'We need to calibrate the ____ before operation.', 'The ____ movement is controlled by advanced algorithms.'],
+            'welding': ['____ is a critical process in automotive manufacturing.', 'The robot performs precise ____ on the car body.', 'We use advanced ____ techniques for better quality.'],
+            'robot': ['The industrial ____ can lift up to 500kg.', 'We need to program the ____ for the new production line.', 'The collaborative ____ works safely with human operators.'],
+            'conveyor': ['The ____ system transports parts between workstations.', 'We need to maintain the ____ belt regularly.', 'The ____ uses sensors to detect part presence.'],
+            'assembly': ['The ____ line produces 100 cars per hour.', 'We need to optimize the ____ process.', 'The ____ station requires precise alignment.'],
+            'sensor': ['The ____ detects the presence of parts on the line.', 'We use multiple ____ for quality control.', 'The ____ data is processed in real-time.'],
+            'motor': ['The ____ provides power to the conveyor system.', 'We need to replace the ____ every 5 years.', 'The ____ speed is controlled by a variable frequency drive.'],
+            'control': ['The ____ system manages all production processes.', 'We need to upgrade the ____ software.', 'The ____ panel allows manual operation of the line.'],
+            'safety': ['____ is our top priority in the factory.', 'We have implemented multiple ____ measures.', 'The ____ fence prevents unauthorized access.'],
+            'quality': ['____ control ensures all products meet standards.', 'We perform rigorous ____ inspections.', 'The ____ management system tracks defects.']
+        };
+        const generalTemplates = [
+            'The ____ is an essential component in the system.',
+            'We need to check the ____ regularly for maintenance.',
+            'The ____ plays a crucial role in the process.',
+            'Please ensure the ____ is properly installed.',
+            'The ____ must be calibrated before use.'
+        ];
+
+        // 显示登录弹窗
+        function showLoginModal() {
+            document.getElementById('loginModal').classList.remove('hidden');
+        }
+
+        // 关闭登录弹窗
+        function closeLoginModal() {
+            document.getElementById('loginModal').classList.add('hidden');
+        }
+
+        // 确认登录弹窗
+        function confirmLoginModal() {
+            const name = document.getElementById('modalUserName').value.trim();
+            const dept = document.getElementById('modalUserDept').value.trim();
+            const position = document.getElementById('modalUserPosition').value.trim();
+
+            if (!name || !dept || !position) {
+                showNotification('⚠️ 请填写完整信息！');
+                return;
+            }
+
+            // 数据验证和清理
+            userInfo = {
+                name: sanitizeString(name),
+                dept: sanitizeString(dept),
+                position: sanitizeString(position)
+            };
+
+            if (!userInfo.name) {
+                showNotification('⚠️ 姓名不能为空！');
+                return;
+            }
+
+            document.getElementById('displayUserName').textContent = `${userInfo.name} - ${userInfo.dept} - ${userInfo.position}`;
+            closeLoginModal();
+
+            // 保存到localStorage
+            saveToLocalStorage();
+        }
+
+        function logout() {
+            if (confirm('确定退出吗？学习记录将保留。')) {
+                userInfo = { name: '', dept: '', position: '' };
+                document.getElementById('displayUserName').textContent = '';
+                document.getElementById('reportContainer').classList.add('hidden');
+                learningRecords = [];
+                wordData = [];
+                currentIndex = 0;
+
+                if (learningStartTime) {
+                    clearInterval(learningTimerInterval);
+                    learningStartTime = null;
+                    totalLearningTime = 0;
+                }
+
+                document.getElementById('status').textContent = '请导入学习包';
+                document.getElementById('progressText').textContent = '0/0';
+                document.getElementById('exerciseContainer').classList.add('hidden');
+
+                // 清理资源和localStorage
+                cleanupResources();
+                clearLocalStorage();
+            }
+        }
+
+        function initCurrentRecord() {
+            currentRecord = {
+                wordIndex: currentIndex,
+                meaning: wordData[currentIndex].meaning,
+                word: wordData[currentIndex].word,
+                wordCorrect: false,
+                sentenceRecorded: false,
+                sentenceDictated: false,
+                sentenceDictatedCorrect: false,
+                wordAttempts: 0
+            };
+        }
+
+        function saveCurrentRecord() {
+            if (currentRecord.wordAttempts > 0) {
+                // 清理记录数据
+                const cleanRecord = {
+                    ...currentRecord,
+                    meaning: sanitizeString(currentRecord.meaning),
+                    word: sanitizeString(currentRecord.word)
+                };
+                learningRecords.push(cleanRecord);
+                // 保存到localStorage
+                saveToLocalStorage();
+            }
+        }
+
+        // 添加文件选择监听器
+        document.getElementById('excelFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                // 文件大小验证（最大10MB）
+                if (file.size > 10 * 1024 * 1024) {
+                    showNotification('⚠️ 文件过大<br><br>文件大小不能超过10MB<br>当前文件大小：' + formatFileSize(file.size));
+                    this.value = ''; // 清空选择
+                    return;
+                }
+                loadExcelFile();
+            }
+        });
+
+        function loadExcelFile() {
+            // 检查XLSX库是否已加载
+            if (typeof XLSX === 'undefined') {
+                showNotification('⚠️ Excel加载库未就绪<br><br>请稍后重试，或使用学习包功能替代');
+                return;
+            }
+
+            const fileInput = document.getElementById('excelFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                showNotification('⚠️ 请先选择Excel文件');
+                return;
+            }
+
+            // 文件类型验证
+            const validTypes = [
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-excel',
+                'application/octet-stream'
+            ];
+            if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
+                showNotification('⚠️ 文件格式不正确<br><br>请上传.xlsx或.xls格式的Excel文件');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: ['word', 'meaning', 'sentence', 'sentenceTranslation'] });
+
+                    // 数据验证和清理
+                    wordData = jsonData.filter(item =>
+                        item && typeof item === 'object' &&
+                        item.word && item.meaning &&
+                        typeof item.word === 'string' &&
+                        typeof item.meaning === 'string' &&
+                        item.word !== '英文' &&
+                        item.meaning !== '专业词汇（中文）'
+                    ).map(item => ({
+                        word: sanitizeString(item.word),
+                        meaning: sanitizeString(item.meaning),
+                        sentence: sanitizeString(item.sentence || ''),
+                        sentenceTranslation: sanitizeString(item.sentenceTranslation || '')
+                    })).filter(item => item.word && item.meaning);
+
+                    if (wordData.length === 0) {
+                        showNotification('⚠️ Excel文件中没有有效的单词数据<br><br>请检查文件格式和内容');
+                        return;
+                    }
+
+                    learningRecords = [];
+                    currentIndex = 0;
+                    isCorrect = false;
+                    currentState = 'word_input';
+                    sentenceRecorded = false;
+                    initCurrentRecord();
+
+                    document.getElementById('status').textContent = `已加载 ${wordData.length} 个单词`;
+                    document.getElementById('progressText').textContent = `1/${wordData.length}`;
+                    document.getElementById('jumpInput').max = wordData.length;
+                    document.getElementById('exerciseContainer').classList.remove('hidden');
+
+                    startLearningTimer();
+
+                    showCurrentWord();
+
+                    // 保存到localStorage
+                    saveToLocalStorage();
+
+                    showNotification('✅ Excel加载成功<br><br>共加载 ' + wordData.length + ' 个单词');
+                } catch (error) {
+                    console.error('加载Excel失败:', error);
+                    showNotification('⚠️ 加载Excel失败<br><br>' + escapeHTML(error.message));
+                }
+            };
+            reader.onerror = function() {
+                showNotification('⚠️ 文件读取失败<br><br>请检查文件是否损坏');
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function showCurrentWord() {
+            const currentWord = wordData[currentIndex];
+            document.getElementById('wordDisplay').textContent = currentWord.meaning;
+            document.getElementById('answerInput').value = '';
+            document.getElementById('answerInput').focus();
+            document.getElementById('feedback').textContent = '';
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('nextAfterDictationBtn').disabled = true;
+            document.getElementById('sentenceExercise').classList.add('hidden');
+            document.getElementById('dictationExercise').classList.add('hidden');
+            document.getElementById('recordBtn').disabled = false;
+            document.getElementById('playBtn').disabled = true;
+            document.getElementById('recordStatus').textContent = '';
+            // 重置录音按钮文本为初始状态
+            document.getElementById('recordBtn').textContent = '录音';
+            isCorrect = false;
+            currentState = 'word_input';
+            sentenceRecorded = false;
+            audioChunks = [];
+            mediaRecorder = null;
+            initCurrentRecord();
+        }
+
+        function checkAnswer() {
+            const userAnswer = document.getElementById('answerInput').value.trim().toLowerCase();
+            const correctAnswer = wordData[currentIndex].word.toLowerCase();
+            const feedback = document.getElementById('feedback');
+
+            currentRecord.wordAttempts++;
+
+            if (userAnswer === correctAnswer) {
+                feedback.textContent = '正确！请至少完成跟读练习再进入下一个单词';
+                feedback.className = 'feedback correct';
+                isCorrect = true;
+                currentRecord.wordCorrect = true;
+                document.getElementById('submitBtn').disabled = true;
+                // 下一个单词按钮保持禁用，直到完成跟读练习
+                document.getElementById('nextAfterDictationBtn').disabled = true;
+                currentState = 'ready_for_next';
+                setTimeout(showSentenceExercise, 800);
+            } else {
+                feedback.textContent = `错误！正确答案: ${wordData[currentIndex].word}`;
+                feedback.className = 'feedback incorrect';
+                currentRecord.wordCorrect = false;
+            }
+
+            // 保存到localStorage
+            saveToLocalStorage();
+        }
+
+        function showSentenceExercise() {
+            const currentWord = wordData[currentIndex];
+            let sentence = currentWord.sentence;
+
+            if (!sentence || sentence.trim() === '') {
+                sentence = generateSentence(currentWord.word);
+            }
+
+            const completeSentence = sentence.replace('{{word}}', currentWord.word);
+            // 使用安全的HTML设置方法，防止XSS攻击
+            safeSetHTML(document.getElementById('sentenceDisplay'), completeSentence);
+            currentSentence = completeSentence;
+
+            if (currentWord.sentenceTranslation && currentWord.sentenceTranslation.trim() !== '') {
+                const translationHtml = `<small>翻译: ${escapeHTML(currentWord.sentenceTranslation)}</small>`;
+                document.getElementById('sentenceDisplay').innerHTML += translationHtml;
+            }
+
+            document.getElementById('sentenceExercise').classList.remove('hidden');
+            document.getElementById('recordStatus').textContent = '';
+            currentState = 'sentence_input';
+            sentenceRecorded = false;
+            audioChunks = [];
+            mediaRecorder = null;
+        }
+
+        function generateSentence(word) {
+            for (const [keyword, templates] of Object.entries(wordTemplates)) {
+                if (word.toLowerCase().includes(keyword)) {
+                    return templates[Math.floor(Math.random() * templates.length)];
+                }
+            }
+            return generalTemplates[Math.floor(Math.random() * generalTemplates.length)];
+        }
+
+        async function toggleRecording() {
+            // 按需初始化音频系统
+            const initialized = await ensureAudioInitialized('record');
+            if (!initialized) {
+                const errorMsg = '❌ 音频系统初始化失败<br><br>' +
+                               '无法使用录音功能，请刷新页面后重试<br><br>' +
+                               '或者直接进行默写练习。';
+                showNotification(errorMsg);
+                return;
+            }
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                const errorMsg = '❌ 当前环境不支持录音功能<br><br>' +
+                               '💡 解决方案：<br>' +
+                               '1. 在手机浏览器中打开使用（推荐Safari或Chrome）<br>' +
+                               '2. 或跳过录音功能，直接进行默写练习<br>' +
+                               '3. 录音功能在电脑浏览器中可正常使用';
+                showNotification(errorMsg);
+                return;
+            }
+
+            const recordBtn = document.getElementById('recordBtn');
+            const playBtn = document.getElementById('playBtn');
+            const recordStatus = document.getElementById('recordStatus');
+
+            if (!isRecording) {
+                recordStatus.textContent = '正在请求麦克风权限...';
+
+                // Android兼容性：配置音频约束
+                const audioConstraints = {
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false,
+                        sampleRate: 44100
+                    }
+                };
+
+                navigator.mediaDevices.getUserMedia(audioConstraints)
+                    .then(stream => {
+                        // 保存媒体流引用，用于清理
+                        mediaStream = stream;
+
+                        // Android兼容性：优先选择支持的格式
+                        let mimeType = 'audio/webm';
+                        const supportedMimeTypes = [
+                            'audio/webm;codecs=opus',
+                            'audio/webm',
+                            'audio/ogg;codecs=opus',
+                            'audio/mp4',
+                            'audio/mpeg',
+                            'audio/aac'
+                        ];
+
+                        for (const type of supportedMimeTypes) {
+                            if (MediaRecorder.isTypeSupported(type)) {
+                                mimeType = type;
+                                console.log('使用录音格式:', mimeType);
+                                break;
+                            }
+                        }
+
+                        currentAudioMimeType = mimeType;
+
+                        // Android兼容性：设置MediaRecorder参数
+                        const options = mimeType ? { mimeType } : {};
+                        try {
+                            mediaRecorder = new MediaRecorder(stream, options);
+                        } catch (e) {
+                            // 某些Android设备不支持特定mimeType，使用默认配置
+                            console.warn('无法使用指定格式，使用默认配置:', e);
+                            mediaRecorder = new MediaRecorder(stream);
+                        }
+
+                        audioChunks = [];
+
+                        mediaRecorder.ondataavailable = (e) => {
+                            if (e.data && e.data.size > 0) {
+                                audioChunks.push(e.data);
+                            }
+                        };
+
+                        mediaRecorder.onstop = () => {
+                            currentRecord.sentenceRecorded = true;
+                            recordBtn.textContent = '重录';
+                            recordBtn.classList.remove('recording');
+                            playBtn.disabled = false;
+                            recordStatus.textContent = '录音完成';
+                            isRecording = false;
+                            sentenceRecorded = true;
+
+                            // 录音完成后，启用进入默写和下一个单词按钮
+                            document.getElementById('nextAfterDictationBtn').disabled = false;
+
+                            // 保存到localStorage
+                            saveToLocalStorage();
+                        };
+
+                        mediaRecorder.onerror = (event) => {
+                            console.error('录音错误:', event.error);
+                            recordStatus.textContent = '录音出错';
+                            isRecording = false;
+                            recordBtn.classList.remove('recording');
+                            showNotification('⚠️ 录音出现问题<br><br>请重试或使用默写功能');
+                        };
+
+                        // 开始录音
+                        try {
+                            mediaRecorder.start(100); // 每100ms触发一次ondataavailable
+                            recordBtn.textContent = '停止';
+                            recordBtn.classList.add('recording');
+                            recordStatus.textContent = '录音中...';
+                            isRecording = true;
+                        } catch (e) {
+                            console.error('启动录音失败:', e);
+                            showNotification('⚠️ 录音启动失败<br><br>请尝试刷新页面后重试');
+                        }
+                    })
+                    .catch(err => {
+                        console.error('录音错误:', err);
+                        let errorMsg = '❌ 无法访问麦克风<br><br>';
+
+                        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                            errorMsg += '原因：麦克风权限被拒绝<br><br>' +
+                                       '💡 解决方案：<br>' +
+                                       '1. Chrome浏览器：点击地址栏左侧的🔒图标，找到麦克风权限选项，选择"允许"<br>' +
+                                       '2. Safari浏览器：点击地址栏左侧的🔒图标，选择"麦克风"权限，点击"允许"<br>' +
+                                       '3. 刷新页面后重试<br>' +
+                                       '4. 如果问题仍存在，请尝试在手机浏览器中使用<br><br>' +
+                                       '如果你不需要录音功能，可以直接进行默写练习。';
+                        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                            errorMsg += '原因：未找到麦克风设备<br><br>' +
+                                       '💡 解决方案：<br>' +
+                                       '1. 检查设备麦克风是否正常<br>' +
+                                       '2. 尝试重启设备<br>' +
+                                       '3. 如果设备有麦克风但仍无法使用，请使用手机浏览器进行练习';
+                        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+                            errorMsg += '原因：麦克风被其他应用占用<br><br>' +
+                                       '💡 解决方案：<br>' +
+                                       '1. 关闭其他可能使用麦克风的应用<br>' +
+                                       '2. 刷新页面后重试<br>' +
+                                       '3. 如果问题仍存在，请使用手机浏览器进行练习';
+                        } else {
+                            errorMsg += '原因：' + escapeHTML(err.message) + '<br><br>' +
+                                       '💡 建议：<br>' +
+                                       '1. 在手机浏览器中打开使用<br>' +
+                                       '2. 或跳过录音功能，直接进行默写练习';
+                        }
+
+                        showNotification(errorMsg);
+                        recordStatus.textContent = '录音失败';
+                        isRecording = false;
+                    });
+            } else {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    // 停止所有轨道
+                    if (mediaStream) {
+                        mediaStream.getTracks().forEach(track => track.stop());
+                        mediaStream = null;
+                    }
+                }
+            }
+        }
+
+        function playRecording() {
+            if (audioChunks.length === 0) {
+                showNotification('⚠️ 还没有录音');
+                return;
+            }
+
+            try {
+                const mimeType = currentAudioMimeType || 'audio/webm';
+                const audioBlob = new Blob(audioChunks, { type: mimeType });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+
+                audio.onended = () => {
+                    URL.revokeObjectURL(audioUrl); // 释放URL对象
+                    document.getElementById('recordStatus').textContent = '录音完成';
+                };
+
+                audio.onerror = () => {
+                    URL.revokeObjectURL(audioUrl);
+                    showNotification('⚠️ 播放录音失败');
+                };
+
+                audio.play()
+                    .then(() => document.getElementById('recordStatus').textContent = '播放中...')
+                    .catch(err => {
+                        console.error('播放错误:', err);
+                        URL.revokeObjectURL(audioUrl);
+                        showNotification('⚠️ 播放录音失败');
+                    });
+            } catch (error) {
+                console.error('播放录音异常:', error);
+                showNotification('⚠️ 播放录音时发生错误');
+            }
+        }
+
+        function showDictation() {
+            document.getElementById('sentenceExercise').classList.add('hidden');
+            document.getElementById('dictationExercise').classList.remove('hidden');
+            document.getElementById('dictationInput').value = '';
+            document.getElementById('dictationInput').focus();
+            document.getElementById('dictationFeedback').textContent = '';
+            currentState = 'dictation_input';
+        }
+
+        function hideDictation() {
+            document.getElementById('dictationExercise').classList.add('hidden');
+            document.getElementById('sentenceExercise').classList.remove('hidden');
+            currentState = 'sentence_input';
+        }
+
+        function checkDictation() {
+            const userInput = document.getElementById('dictationInput').value.trim().toLowerCase();
+            const cleanSentence = currentSentence.replace(/<[^>]+>/g, '').trim().toLowerCase();
+            const feedback = document.getElementById('dictationFeedback');
+
+            if (userInput === cleanSentence) {
+                feedback.textContent = '正确！';
+                feedback.className = 'feedback correct';
+                currentRecord.sentenceDictatedCorrect = true;
+            } else {
+                feedback.textContent = `错误！正确: ${currentSentence.replace(/<[^>]+>/g, '')}`;
+                feedback.className = 'feedback incorrect';
+                currentRecord.sentenceDictatedCorrect = false;
+            }
+            currentRecord.sentenceDictated = true;
+
+            // 默写练习完成后，启用下一个单词按钮
+            document.getElementById('nextAfterDictationBtn').disabled = false;
+
+            // 保存到localStorage
+            saveToLocalStorage();
+        }
+
+        let savedDictationInput = '';
+
+        function showDictationHint() {
+            savedDictationInput = document.getElementById('dictationInput').value;
+            document.getElementById('dictationInput').value = currentSentence.replace(/<[^>]+>/g, '');
+            document.getElementById('dictationFeedback').textContent = '查看答案中...';
+            document.getElementById('dictationFeedback').className = 'feedback';
+        }
+
+        function hideDictationHint() {
+            document.getElementById('dictationInput').value = savedDictationInput;
+            document.getElementById('dictationFeedback').textContent = '';
+            savedDictationInput = '';
+        }
+
+        function nextWord() {
+            saveCurrentRecord();
+
+            if (currentIndex < wordData.length - 1) {
+                currentIndex++;
+                document.getElementById('progressText').textContent = `${currentIndex + 1}/${wordData.length}`;
+                showCurrentWord();
+            } else {
+                if (confirm('🎉 恭喜完成所有练习！\n\n已完成：' + wordData.length + '个单词\n正确率：' + calculateAccuracy() + '%\n学习时长：' + formatLearningTime(totalLearningTime) + '\n\n是否现在提交学习记录？')) {
+                    submitLearningRecord();
+                } else {
+                    currentIndex = 0;
+                    document.getElementById('progressText').textContent = `1/${wordData.length}`;
+                    showCurrentWord();
+                }
+            }
+        }
+
+        function jumpToWord() {
+            const jumpInput = document.getElementById('jumpInput');
+            const targetIndex = parseInt(jumpInput.value) - 1;
+
+            if (isNaN(targetIndex) || targetIndex < 0 || targetIndex >= wordData.length) {
+                showNotification(`⚠️ 请输入1到${wordData.length}之间的数字`);
+                jumpInput.value = '';
+                return;
+            }
+
+            currentIndex = targetIndex;
+            document.getElementById('progressText').textContent = `${currentIndex + 1}/${wordData.length}`;
+            showCurrentWord();
+            jumpInput.value = '';
+
+            // 保存到localStorage
+            saveToLocalStorage();
+        }
+
+        function showHint() {
+            document.getElementById('answerInput').value = wordData[currentIndex].word;
+        }
+
+        function hideHint() {
+            if (!isCorrect) {
+                document.getElementById('answerInput').value = '';
+            }
+        }
+
+        async function readWord() {
+            // 按需初始化音频系统
+            const initialized = await ensureAudioInitialized('read_word');
+            if (!initialized) {
+                showNotification('⚠️ 音频系统初始化失败，无法朗读单词');
+                return;
+            }
+
+            const currentWord = wordData[currentIndex].word;
+
+            if ('speechSynthesis' in window) {
+                const synth = window.speechSynthesis;
+
+                // Android兼容性修复：先停止当前播放
+                if (synth.speaking) {
+                    synth.cancel();
+                }
+
+                const utterance = new SpeechSynthesisUtterance(currentWord);
+                utterance.lang = 'en-US';
+                utterance.rate = 0.8;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                const loadVoices = () => {
+                    const voices = synth.getVoices();
+
+                    // Android兼容性：优先选择Google US English或其他高质量语音
+                    let enUSVoice = voices.find(voice =>
+                        voice.lang === 'en-US' &&
+                        (voice.name.includes('Google') || voice.name.includes('US English'))
+                    );
+
+                    // 备选方案：任意en-US语音
+                    if (!enUSVoice) {
+                        enUSVoice = voices.find(voice => voice.lang.startsWith('en'));
+                    }
+
+                    if (enUSVoice) {
+                        utterance.voice = enUSVoice;
+                        console.log('使用语音:', enUSVoice.name);
+                    }
+
+                    synth.speak(utterance);
+                };
+
+                // Android兼容性：立即尝试加载语音，不等待voiceschanged事件
+                const voices = synth.getVoices();
+                if (voices.length === 0) {
+                    synth.onvoiceschanged = loadVoices;
+                } else {
+                    // 小延迟确保语音系统就绪
+                    setTimeout(loadVoices, 100);
+                }
+            } else {
+                showNotification('⚠️ 您的设备不支持语音播放功能<br><br>请使用其他浏览器或设备');
+            }
+        }
+
+        async function readSentence() {
+            // 按需初始化音频系统
+            const initialized = await ensureAudioInitialized('read_sentence');
+            if (!initialized) {
+                showNotification('⚠️ 音频系统初始化失败，无法朗读句子');
+                return;
+            }
+
+            const cleanSentence = currentSentence.replace(/<[^>]+>/g, '');
+
+            if ('speechSynthesis' in window) {
+                const synth = window.speechSynthesis;
+
+                // Android兼容性修复：先停止当前播放
+                if (synth.speaking) {
+                    synth.cancel();
+                }
+
+                const utterance = new SpeechSynthesisUtterance(cleanSentence);
+                utterance.lang = 'en-US';
+                utterance.rate = 0.8;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                const loadVoices = () => {
+                    const voices = synth.getVoices();
+
+                    // Android兼容性：优先选择Google US English或其他高质量语音
+                    let enUSVoice = voices.find(voice =>
+                        voice.lang === 'en-US' &&
+                        (voice.name.includes('Google') || voice.name.includes('US English'))
+                    );
+
+                    // 备选方案：任意en语音
+                    if (!enUSVoice) {
+                        enUSVoice = voices.find(voice => voice.lang.startsWith('en'));
+                    }
+
+                    if (enUSVoice) {
+                        utterance.voice = enUSVoice;
+                        console.log('使用语音:', enUSVoice.name);
+                    }
+
+                    synth.speak(utterance);
+                };
+
+                // Android兼容性：立即尝试加载语音，不等待voiceschanged事件
+                const voices = synth.getVoices();
+                if (voices.length === 0) {
+                    synth.onvoiceschanged = loadVoices;
+                } else {
+                    // 小延迟确保语音系统就绪
+                    setTimeout(loadVoices, 100);
+                }
+            } else {
+                showNotification('⚠️ 您的设备不支持语音播放功能<br><br>请使用其他浏览器或设备');
+            }
+        }
+
+        function showReport() {
+            if (learningRecords.length === 0 && currentRecord.wordAttempts === 0) {
+                showNotification('⚠️ 还没有学习记录');
+                return;
+            }
+
+            // 只保存当前记录且该记录未被保存过
+            if (currentRecord.wordAttempts > 0) {
+                // 检查当前记录是否已经在 learningRecords 中
+                const isAlreadySaved = learningRecords.some(record => 
+                    record.wordIndex === currentRecord.wordIndex
+                );
+                
+                // 只有当当前记录未被保存时才保存
+                if (!isAlreadySaved) {
+                    saveCurrentRecord();
+                }
+            }
+
+            document.getElementById('reportUserInfo').textContent =
+                `${userInfo.name} | ${userInfo.dept} | ${userInfo.position}`;
+
+            const totalWords = learningRecords.length;
+            const wordCorrectCount = learningRecords.filter(r => r.wordCorrect).length;
+            const totalAttempts = learningRecords.reduce((sum, r) => sum + r.wordAttempts, 0);
+            const correctAttempts = learningRecords.reduce((sum, r) => sum + (r.wordCorrect ? 1 : 0), 0);
+            const accuracy = totalAttempts > 0 ? Math.round((correctAttempts / totalAttempts) * 100) : 0;
+
+            document.getElementById('reportTotalWords').textContent = totalWords;
+            document.getElementById('reportAccuracy').textContent = accuracy + '%';
+            document.getElementById('reportCorrectCount').textContent = correctAttempts;
+            document.getElementById('reportIncorrectCount').textContent = totalAttempts - correctAttempts;
+
+            const tableBody = document.getElementById('reportTableBody');
+            tableBody.innerHTML = '';
+
+            learningRecords.forEach((record, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${escapeHTML(record.meaning)}</td>
+                    <td>${escapeHTML(record.word)}</td>
+                    <td><span class="${record.wordCorrect ? 'status-correct' : 'status-incorrect'}">${record.wordCorrect ? '✓' : '✗'}</span></td>
+                    <td><span class="${record.sentenceRecorded ? 'status-correct' : 'status-incorrect'}">${record.sentenceRecorded ? '✓' : '✗'}</span></td>
+                    <td><span class="${record.sentenceDictated ? (record.sentenceDictatedCorrect ? 'status-correct' : 'status-incorrect') : 'status-incorrect'}">${record.sentenceDictated ? (record.sentenceDictatedCorrect ? '✓' : '✗') : '✗'}</span></td>
+                `;
+                tableBody.appendChild(row);
+            });
+
+            document.getElementById('practiceContainer').classList.add('hidden');
+            document.getElementById('reportContainer').classList.remove('hidden');
+        }
+
+        function hideReport() {
+            document.getElementById('reportContainer').classList.add('hidden');
+            document.getElementById('practiceContainer').classList.remove('hidden');
+        }
+
+        function exportReport() {
+            let csvContent = '\uFEFF学习统计报告\n';
+            csvContent += `姓名,${userInfo.name}\n部门,${userInfo.dept}\n岗位,${userInfo.position}\n导出时间,${new Date().toLocaleString()}\n\n`;
+
+            csvContent += '统计信息\n';
+            const totalAttempts = learningRecords.reduce((sum, r) => sum + r.wordAttempts, 0);
+            const correctAttempts = learningRecords.reduce((sum, r) => sum + (r.wordCorrect ? 1 : 0), 0);
+            const accuracy = totalAttempts > 0 ? Math.round((correctAttempts / totalAttempts) * 100) : 0;
+            csvContent += `学习单词数,${learningRecords.length}\n正确率,${accuracy}%\n正确次数,${correctAttempts}\n错误次数,${totalAttempts - correctAttempts}\n\n`;
+
+            csvContent += '学习详情\n序号,中文,英文,单词,跟读,默写\n';
+
+            learningRecords.forEach((record, index) => {
+                csvContent += `${index + 1},${record.meaning},${record.word},${record.wordCorrect ? '正确' : '错误'},${record.sentenceRecorded ? '已完成' : '未练习'},${record.sentenceDictated ? (record.sentenceDictatedCorrect ? '正确' : '错误') : '未练习'}\n`;
+            });
+
+            try {
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `${userInfo.name}_学习报告_${new Date().toLocaleDateString().replace(/\//g, '-')}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('导出报告失败:', error);
+                showNotification('⚠️ 导出报告失败<br><br>' + escapeHTML(error.message));
+            }
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+
+                const activeElement = document.activeElement;
+
+                if (activeElement === document.getElementById('jumpInput')) {
+                    jumpToWord();
+                    return;
+                }
+
+                if (activeElement === document.getElementById('dictationInput')) {
+                    checkDictation();
+                    return;
+                }
+
+                if (activeElement === document.getElementById('answerInput')) {
+                    checkAnswer();
+                    return;
+                }
+
+                // 检查默写练习后的下一个单词按钮是否可用
+                const nextAfterDictationBtn = document.getElementById('nextAfterDictationBtn');
+                if (!nextAfterDictationBtn.disabled) {
+                    nextWord();
+                    return;
+                }
+
+                switch(currentState) {
+                    case 'word_input': checkAnswer(); break;
+                    case 'sentence_input': showDictation(); break;
+                    case 'dictation_input': checkDictation(); break;
+                    case 'ready_for_next': nextWord(); break;
+                }
+            } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault();
+
+                const answerInput = document.getElementById('answerInput');
+                const dictationInput = document.getElementById('dictationInput');
+
+                if (!document.getElementById('sentenceExercise').classList.contains('hidden')) {
+                    if (document.activeElement === answerInput) {
+                        dictationInput.focus();
+                    } else if (document.activeElement === dictationInput) {
+                        answerInput.focus();
+                    }
+                } else if (!document.getElementById('dictationExercise').classList.contains('hidden')) {
+                    if (document.activeElement === answerInput) {
+                        dictationInput.focus();
+                    } else if (document.activeElement === dictationInput) {
+                        answerInput.focus();
+                    }
+                }
+            }
+        });
+
+        // ========== 学习包管理功能 ==========
+
+        // Base64 编码函数
+        function encodeBase64(str) {
+            try {
+                // 将字符串转换为 UTF-8 字节数组，然后编码为 Base64
+                const utf8Bytes = encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
+                    function(match, p1) {
+                        return String.fromCharCode('0x' + p1);
+                    });
+                return btoa(utf8Bytes);
+            } catch (error) {
+                console.error('Base64编码失败:', error);
+                throw new Error('编码失败');
+            }
+        }
+
+        // Base64 解码函数
+        function decodeBase64(base64Str) {
+            try {
+                // 解码 Base64 并转换为 UTF-8 字符串
+                const utf8Str = atob(base64Str);
+                return decodeURIComponent(utf8Str.split('').map(function(c) {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
+            } catch (error) {
+                console.error('Base64解码失败:', error);
+                throw new Error('解码失败，文件可能已损坏');
+            }
+        }
+
+        function exportLearningPackage() {
+            if (wordData.length === 0) {
+                showNotification('⚠️ 请先加载Excel单词表！');
+                return;
+            }
+
+            const taskName = prompt('请输入任务名称（如：机器人专业词汇）：', '机器人专业词汇');
+            if (!taskName) return;
+
+            // 验证和清理任务名称
+            const cleanTaskName = sanitizeString(taskName);
+            if (!cleanTaskName) {
+                showNotification('⚠️ 任务名称不能为空');
+                return;
+            }
+
+            const packageData = {
+                version: "v2.0",
+                createTime: new Date().toISOString(),
+                taskInfo: {
+                    taskName: cleanTaskName,
+                    totalWords: wordData.length,
+                    estimatedTime: Math.round(wordData.length * 2) + "分钟",
+                    creator: userInfo.name || "管理员"
+                },
+                wordData: wordData,
+                learningConfig: {
+                    enableRecording: true,
+                    enableDictation: true,
+                    showRealtimeStats: true
+                }
+            };
+
+            // 将 JSON 数据转换为 Base64 编码
+            try {
+                const jsonData = JSON.stringify(packageData, null, 2);
+                const base64Data = encodeBase64(jsonData);
+
+                // 创建包含 Base64 数据的文件内容
+                const fileContent = base64Data;
+
+                downloadTextFile(fileContent, `${cleanTaskName}_学习包.learning`);
+                showNotification('✅ 学习包已生成！<br><br>文件已加密为 Base64 格式<br>学员无法直接查看内容<br><br>请将此文件上传到钉钉群文件夹的"学习任务包"目录。');
+            } catch (error) {
+                console.error('导出学习包失败:', error);
+                showNotification('⚠️ 导出学习包失败<br><br>' + escapeHTML(error.message));
+            }
+        }
+
+        function importLearningPackage() {
+            // 检查是否已登录
+            if (!userInfo.name || !userInfo.dept || !userInfo.position) {
+                showNotification('⚠️ 请先登录！<br><br>导入学习包前需要先登录系统<br><br>请点击"学员"菜单中的"登录"按钮进行登录');
+                showLoginModal();
+                return;
+            }
+
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.learning';
+            fileInput.onchange = async function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                // 文件大小验证
+                if (file.size > 10 * 1024 * 1024) {
+                    showNotification('⚠️ 文件过大<br><br>文件大小不能超过10MB');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        // 读取 Base64 编码的文件内容
+                        const base64Content = e.target.result.trim();
+
+                        // 解码 Base64 数据
+                        const jsonData = decodeBase64(base64Content);
+                        const packageData = JSON.parse(jsonData);
+
+                        loadPackageData(packageData);
+                    } catch (error) {
+                        console.error('解析错误:', error);
+                        showNotification('⚠️ 文件格式错误或已损坏<br><br>请确保使用正确的学习包文件(.learning)');
+                    }
+                };
+                reader.onerror = function() {
+                    showNotification('⚠️ 文件读取失败');
+                };
+                reader.readAsText(file);
+            };
+            fileInput.click();
+        }
+
+        function loadPackageData(packageData) {
+            // 数据验证
+            if (!packageData || typeof packageData !== 'object') {
+                showNotification('⚠️ 学习包格式错误：无效的数据格式');
+                return;
+            }
+
+            if (!packageData.wordData || !Array.isArray(packageData.wordData)) {
+                showNotification('⚠️ 学习包格式错误：缺少单词数据！');
+                return;
+            }
+
+            if (packageData.wordData.length === 0) {
+                showNotification('⚠️ 学习包为空：没有单词数据');
+                return;
+            }
+
+            // 验证和清理单词数据
+            wordData = packageData.wordData.filter(item =>
+                item && typeof item === 'object' &&
+                typeof item.word === 'string' &&
+                typeof item.meaning === 'string'
+            ).map(item => ({
+                word: sanitizeString(item.word),
+                meaning: sanitizeString(item.meaning),
+                sentence: sanitizeString(item.sentence || ''),
+                sentenceTranslation: sanitizeString(item.sentenceTranslation || '')
+            })).filter(item => item.word && item.meaning);
+
+            if (wordData.length === 0) {
+                showNotification('⚠️ 学习包中没有有效的单词数据');
+                return;
+            }
+
+            currentTaskInfo = packageData.taskInfo || {};
+            isLearningPackageMode = true;
+
+            // 安全地显示任务信息
+            if (currentTaskInfo) {
+                const taskInfoHTML = `
+                    <div style="background: #e8f4f8; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #3498db;">
+                        <h3 style="margin: 0 0 10px 0; color: #2c3e50;">📚 ${escapeHTML(currentTaskInfo.taskName || '学习任务')}</h3>
+                        <p style="margin: 5px 0; color: #555;"><strong>单词数量：</strong>${wordData.length}个</p>
+                        <p style="margin: 5px 0; color: #555;"><strong>预计用时：</strong>${escapeHTML(currentTaskInfo.estimatedTime || '未知')}</p>
+                        <p style="margin: 5px 0; color: #555;"><strong>创建时间：</strong>${currentTaskInfo.createTime ? new Date(currentTaskInfo.createTime).toLocaleString() : '未知'}</p>
+                    </div>
+                `;
+                document.getElementById('status').innerHTML = taskInfoHTML;
+            }
+
+            learningRecords = [];
+            currentIndex = 0;
+            isCorrect = false;
+            currentState = 'word_input';
+            sentenceRecorded = false;
+            initCurrentRecord();
+
+            document.getElementById('progressText').textContent = `1/${wordData.length}`;
+            document.getElementById('jumpInput').max = wordData.length;
+            document.getElementById('exerciseContainer').classList.remove('hidden');
+
+            startLearningTimer();
+
+            showCurrentWord();
+
+            // 保存到localStorage
+            saveToLocalStorage();
+
+            showNotification('✅ 学习包加载成功！<br><br>任务：' + escapeHTML(currentTaskInfo.taskName || '未知') + '<br>单词数：' + wordData.length + '个<br><br>点击"确定"开始学习。');
+        }
+
+        function downloadTextFile(content, filename) {
+            try {
+                const blob = new Blob([content], {type: 'text/plain'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('下载文件失败:', error);
+                showNotification('⚠️ 下载失败<br><br>' + escapeHTML(error.message));
+            }
+        }
+
+        // 通用下载JSON文件函数
+        function downloadJSON(data, filename) {
+            try {
+                const jsonString = JSON.stringify(data, null, 2);
+                const blob = new Blob([jsonString], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('下载JSON失败:', error);
+                showNotification('⚠️ 下载失败<br><br>' + escapeHTML(error.message));
+            }
+        }
+
+        // ========== 学习计时功能 ==========
+
+        function startLearningTimer() {
+            if (learningTimerInterval) {
+                clearInterval(learningTimerInterval);
+            }
+            learningStartTime = Date.now();
+            totalLearningTime = 0;
+
+            learningTimerInterval = setInterval(() => {
+                if (learningStartTime) {
+                    const elapsed = Math.floor((Date.now() - learningStartTime) / 1000);
+                    totalLearningTime = elapsed;
+                }
+            }, 1000);
+        }
+
+        function formatLearningTime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+
+            if (hours > 0) {
+                return `${hours}小时${minutes}分钟`;
+            } else if (minutes > 0) {
+                return `${minutes}分钟${secs}秒`;
+            } else {
+                return `${secs}秒`;
+            }
+        }
+
+        // ========== 学习记录提交功能 ==========
+
+        function submitLearningRecord() {
+            // 直接使用当前登录用户信息，无需重新填写
+            if (!userInfo.name || !userInfo.dept || !userInfo.position) {
+                showNotification('⚠️ 请先登录！<br><br>导出学习记录前需要先登录系统<br><br>请点击"学员"菜单中的"登录"按钮进行登录');
+                showLoginModal();
+                return;
+            }
+
+            const learningRecord = {
+                submitTime: new Date().toISOString(),
+                taskInfo: currentTaskInfo || { taskName: "自定义学习", totalWords: wordData.length },
+                studentInfo: {
+                    name: userInfo.name,
+                    department: userInfo.dept,
+                    position: userInfo.position
+                },
+                learningProgress: {
+                    completedWords: learningRecords.length,
+                    totalWords: wordData.length,
+                    totalTime: totalLearningTime,
+                    completionRate: Math.round((learningRecords.length / wordData.length) * 100)
+                },
+                performance: {
+                    accuracy: calculateAccuracy(),
+                    correctCount: learningRecords.filter(r => r.wordCorrect).length,
+                    incorrectCount: learningRecords.filter(r => !r.wordCorrect).length,
+                    recordingCount: learningRecords.filter(r => r.sentenceRecorded).length,
+                    dictationCount: learningRecords.filter(r => r.sentenceDictated).length
+                },
+                wordDetails: learningRecords.map((record, index) => ({
+                    wordIndex: index,
+                    word: record.word,
+                    meaning: record.meaning,
+                    isCorrect: record.wordCorrect,
+                    attempts: record.wordAttempts,
+                    recordingCompleted: record.sentenceRecorded,
+                    dictationCompleted: record.sentenceDictated
+                }))
+            };
+
+            const filename = `${userInfo.name}_${userInfo.dept}_学习记录_${new Date().toLocaleDateString().replace(/\//g, '')}.json`;
+
+            downloadJSON(learningRecord, filename);
+
+            showNotification('✅ 学习记录已生成！<br><br>学员：' + escapeHTML(userInfo.name) + '<br>部门：' + escapeHTML(userInfo.dept) + '<br>文件名：' + escapeHTML(filename) + '<br><br>请将此文件上传到钉钉群文件夹的"学习记录提交"目录。');
+
+            if (confirm('是否查看本次学习统计？')) {
+                showReport();
+            }
+        }
+
+        function promptForStudentInfo() {
+            const name = prompt('请输入您的姓名：', userInfo.name || '');
+            const department = prompt('请输入您的部门：', userInfo.dept || '');
+            const position = prompt('请输入您的岗位：', userInfo.position || '');
+
+            return {
+                name: name ? sanitizeString(name) : '',
+                department: department ? sanitizeString(department) : '',
+                position: position ? sanitizeString(position) : ''
+            };
+        }
+
+        function calculateAccuracy() {
+            if (learningRecords.length === 0) return 0;
+            const correctCount = learningRecords.filter(r => r.wordCorrect).length;
+            return Math.round((correctCount / learningRecords.length) * 100);
+        }
+
+        // ========== 管理员监控面板功能 ==========
+
+        function showMonitoringDashboard() {
+            document.getElementById('practiceContainer').classList.add('hidden');
+            document.getElementById('reportContainer').classList.add('hidden');
+
+            let dashboard = document.getElementById('monitoringDashboard');
+            if (!dashboard) {
+                dashboard = document.createElement('div');
+                dashboard.id = 'monitoringDashboard';
+                dashboard.className = 'report-container';
+                dashboard.innerHTML = `
+                    <div class="report-header">
+                        <h2>学习情况监控面板</h2>
+                        <p>管理员专用 · 实时监控学员学习进度</p>
+                    </div>
+
+                    <div class="report-section">
+                        <h3>快速统计</h3>
+                        <div class="report-grid">
+                            <div class="report-item">
+                                <strong>已提交人数</strong>
+                                <span id="monitorSubmittedCount">0</span>
+                            </div>
+                            <div class="report-item">
+                                <strong>平均正确率</strong>
+                                <span id="monitorAvgAccuracy">0%</span>
+                            </div>
+                            <div class="report-item">
+                                <strong>平均学习时长</strong>
+                                <span id="monitorAvgTime">0分钟</span>
+                            </div>
+                            <div class="report-item">
+                                <strong>平均完成率</strong>
+                                <span id="monitorAvgCompletion">0%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="report-section">
+                        <h3>操作说明</h3>
+                        <ol style="margin-left: 20px; line-height: 1.8; color: #555;">
+                            <li>学员将学习记录上传到钉钉群文件夹"学习记录提交"</li>
+                            <li>管理员点击"加载记录文件"选择多个JSON文件</li>
+                            <li>系统自动统计并显示学员学习情况</li>
+                            <li>可导出完整的监控报告</li>
+                        </ol>
+                    </div>
+
+                    <div class="report-section">
+                        <h3>学员学习记录</h3>
+                        <div id="monitorRecordList" style="max-height: 400px; overflow-y: auto;">
+                            <p style="text-align: center; color: #999; padding: 20px;">暂无学习记录，请先加载文件</p>
+                        </div>
+                    </div>
+
+                    <div class="report-buttons">
+                        <button onclick="loadMonitoringRecords()">📁 加载记录文件</button>
+                        <button class="export" onclick="exportMonitoringReport()">📊 导出监控报告</button>
+                        <button onclick="hideMonitoringDashboard()">🔙 返回练习</button>
+                    </div>
+                `;
+
+                document.body.appendChild(dashboard);
+            } else {
+                dashboard.classList.remove('hidden');
+            }
+        }
+
+        function hideMonitoringDashboard() {
+            document.getElementById('monitoringDashboard').classList.add('hidden');
+            document.getElementById('practiceContainer').classList.remove('hidden');
+        }
+
+        function loadMonitoringRecords() {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.multiple = true;
+            fileInput.accept = '.json';
+            fileInput.onchange = function(e) {
+                const files = Array.from(e.target.files);
+                if (files.length === 0) return;
+
+                // 文件大小验证
+                const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+                if (totalSize > 50 * 1024 * 1024) { // 50MB
+                    showNotification('⚠️ 文件总大小过大<br><br>请分批加载，每次不超过50MB');
+                    return;
+                }
+
+                collectedRecords = [];
+                let processedCount = 0;
+
+                files.forEach(file => {
+                    // 单个文件大小验证
+                    if (file.size > 10 * 1024 * 1024) {
+                        console.warn('跳过过大的文件:', file.name);
+                        processedCount++;
+                        if (processedCount === files.length) {
+                            updateMonitoringDisplay();
+                        }
+                        return;
+                    }
+
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const record = JSON.parse(e.target.result);
+                            // 数据验证
+                            if (record && typeof record === 'object' &&
+                                record.studentInfo && typeof record.studentInfo === 'object' &&
+                                record.learningProgress && typeof record.learningProgress === 'object' &&
+                                record.performance && typeof record.performance === 'object') {
+                                collectedRecords.push(record);
+                            } else {
+                                console.warn('无效的学习记录格式:', file.name);
+                            }
+                        } catch (error) {
+                            console.error('文件解析失败:', file.name, error);
+                        }
+
+                        processedCount++;
+                        if (processedCount === files.length) {
+                            updateMonitoringDisplay();
+                        }
+                    };
+                    reader.onerror = function() {
+                        console.error('文件读取失败:', file.name);
+                        processedCount++;
+                        if (processedCount === files.length) {
+                            updateMonitoringDisplay();
+                        }
+                    };
+                    reader.readAsText(file);
+                });
+            };
+            fileInput.click();
+        }
+
+        function updateMonitoringDisplay() {
+            if (collectedRecords.length === 0) {
+                showNotification('⚠️ 未找到有效的学习记录文件！');
+                return;
+            }
+
+            const submittedCount = collectedRecords.length;
+            const avgAccuracy = collectedRecords.reduce((sum, r) => sum + (r.performance?.accuracy || 0), 0) / submittedCount;
+            const avgTime = collectedRecords.reduce((sum, r) => sum + (r.learningProgress?.totalTime || 0), 0) / submittedCount;
+            const avgCompletion = collectedRecords.reduce((sum, r) => sum + (r.learningProgress?.completionRate || 0), 0) / submittedCount;
+
+            document.getElementById('monitorSubmittedCount').textContent = submittedCount + '人';
+            document.getElementById('monitorAvgAccuracy').textContent = Math.round(avgAccuracy) + '%';
+            document.getElementById('monitorAvgTime').textContent = Math.round(avgTime / 60) + '分钟';
+            document.getElementById('monitorAvgCompletion').textContent = Math.round(avgCompletion) + '%';
+
+            const recordList = document.getElementById('monitorRecordList');
+            recordList.innerHTML = collectedRecords.map((record, index) => {
+                const accuracy = record.performance?.accuracy || 0;
+                const borderColor = accuracy >= 80 ? '#27ae60' : accuracy >= 60 ? '#f39c12' : '#e74c3c';
+                const textColor = accuracy >= 80 ? '#27ae60' : accuracy >= 60 ? '#f39c12' : '#e74c3c';
+
+                return `
+                <div style="background: #f9f9f9; padding: 12px; margin-bottom: 10px; border-radius: 6px; border-left: 3px solid ${borderColor};">
+                    <h4 style="margin: 0 0 8px 0; color: #2c3e50;">${escapeHTML(record.studentInfo?.name || '未知')} - ${escapeHTML(record.studentInfo?.department || '未知')}</h4>
+                    <div style="font-size: 13px; color: #555; line-height: 1.6;">
+                        <p><strong>岗位：</strong>${escapeHTML(record.studentInfo?.position || '未知')}</p>
+                        <p><strong>进度：</strong>${record.learningProgress?.completedWords || 0}/${record.learningProgress?.totalWords || 0} (${record.learningProgress?.completionRate || 0}%)</p>
+                        <p><strong>正确率：</strong><span style="color: ${textColor}; font-weight: bold;">${accuracy}%</span></p>
+                        <p><strong>学习时长：</strong>${formatLearningTime(record.learningProgress?.totalTime || 0)}</p>
+                        <p><strong>跟读完成：</strong>${record.performance?.recordingCount || 0}个 | <strong>默写完成：</strong>${record.performance?.dictationCount || 0}个</p>
+                        <p><strong>提交时间：</strong>${record.submitTime ? new Date(record.submitTime).toLocaleString() : '未知'}</p>
+                    </div>
+                </div>
+            `}).join('');
+
+            showNotification('✅ 成功加载 ' + collectedRecords.length + ' 条学习记录！');
+        }
+
+        function exportMonitoringReport() {
+            if (collectedRecords.length === 0) {
+                showNotification('⚠️ 请先加载学习记录文件！');
+                return;
+            }
+
+            // 检查XLSX库是否已加载
+            if (typeof XLSX === 'undefined') {
+                showNotification('⚠️ Excel导出库未就绪<br><br>请稍后重试');
+                return;
+            }
+
+            try {
+                const wb = XLSX.utils.book_new();
+
+                const submittedCount = collectedRecords.length;
+                const avgAccuracy = Math.round(collectedRecords.reduce((sum, r) => sum + (r.performance?.accuracy || 0), 0) / submittedCount);
+                const avgTime = Math.round(collectedRecords.reduce((sum, r) => sum + (r.learningProgress?.totalTime || 0), 0) / submittedCount / 60);
+                const avgCompletion = Math.round(collectedRecords.reduce((sum, r) => sum + (r.learningProgress?.completionRate || 0), 0) / submittedCount);
+
+                const summaryData = [
+                    ['学习监控报告'],
+                    [''],
+                    ['报告生成时间', new Date().toLocaleString()],
+                    [''],
+                    ['统计概览'],
+                    ['已提交人数', submittedCount + '人'],
+                    ['平均正确率', avgAccuracy + '%'],
+                    ['平均学习时长', avgTime + '分钟'],
+                    ['平均完成率', avgCompletion + '%'],
+                    [''],
+                    ['部门统计']
+                ];
+
+                const deptStats = {};
+                collectedRecords.forEach(record => {
+                    const dept = record.studentInfo?.department || '未知部门';
+                    if (!deptStats[dept]) {
+                        deptStats[dept] = { count: 0, totalAccuracy: 0, totalTime: 0 };
+                    }
+                    deptStats[dept].count++;
+                    deptStats[dept].totalAccuracy += record.performance?.accuracy || 0;
+                    deptStats[dept].totalTime += record.learningProgress?.totalTime || 0;
+                });
+
+                Object.keys(deptStats).forEach(dept => {
+                    summaryData.push([
+                        dept,
+                        deptStats[dept].count + '人',
+                        Math.round(deptStats[dept].totalAccuracy / deptStats[dept].count) + '%',
+                        Math.round(deptStats[dept].totalTime / deptStats[dept].count / 60) + '分钟'
+                    ]);
+                });
+
+                const summaryWS = XLSX.utils.aoa_to_sheet(summaryData);
+                XLSX.utils.book_append_sheet(wb, summaryWS, '统计概览');
+
+                const detailData = [
+                    ['序号', '姓名', '部门', '岗位', '完成进度', '正确率', '学习时长', '跟读完成', '默写完成', '提交时间']
+                ];
+
+                collectedRecords.forEach((record, index) => {
+                    detailData.push([
+                        index + 1,
+                        record.studentInfo?.name || '未知',
+                        record.studentInfo?.department || '未知',
+                        record.studentInfo?.position || '未知',
+                        `${record.learningProgress?.completedWords || 0}/${record.learningProgress?.totalWords || 0} (${record.learningProgress?.completionRate || 0}%)`,
+                        (record.performance?.accuracy || 0) + '%',
+                        formatLearningTime(record.learningProgress?.totalTime || 0),
+                        (record.performance?.recordingCount || 0) + '个',
+                        (record.performance?.dictationCount || 0) + '个',
+                        record.submitTime ? new Date(record.submitTime).toLocaleString() : '未知'
+                    ]);
+                });
+
+                const detailWS = XLSX.utils.aoa_to_sheet(detailData);
+                XLSX.utils.book_append_sheet(wb, detailWS, '详细记录');
+
+                XLSX.writeFile(wb, `学习监控报告_${new Date().toLocaleDateString().replace(/\//g, '')}.xlsx`);
+
+                showNotification('✅ 监控报告已导出！');
+            } catch (error) {
+                console.error('导出监控报告失败:', error);
+                showNotification('⚠️ 导出监控报告失败<br><br>' + escapeHTML(error.message));
+            }
+        }
+
+        // ========== 下拉菜单控制 ==========
+
+        function toggleDropdown(dropdownId) {
+            const dropdown = document.getElementById(dropdownId);
+            const allDropdowns = document.querySelectorAll('.dropdown-content');
+
+            allDropdowns.forEach(d => {
+                if (d.id !== dropdownId) {
+                    d.classList.remove('show');
+                }
+            });
+
+            dropdown.classList.toggle('show');
+        }
+
+        document.addEventListener('click', function(event) {
+            const dropdowns = document.querySelectorAll('.nav-dropdown');
+            dropdowns.forEach(dropdown => {
+                if (!dropdown.contains(event.target)) {
+                    const content = dropdown.querySelector('.dropdown-content');
+                    if (content) {
+                        content.classList.remove('show');
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
